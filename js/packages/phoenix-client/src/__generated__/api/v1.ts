@@ -4,6 +4,181 @@
  */
 
 export interface paths {
+    "/v1/access/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List access grants */
+        get: operations["listAccessGrants"];
+        put?: never;
+        /**
+         * Author an access grant (allow-only, idempotent)
+         * @description Grant a subject access to an object (or, with ``object_id`` omitted, to every
+         *     object of that type). Monotonic and allow-only: grants only ever *add* access.
+         *     Idempotent — re-granting the same subject+object updates only the role. Authoring a grant
+         *     on a specific object needs OBJ_MANAGE_ACCESS on it; a type-wide grant is admin-only.
+         */
+        post: operations["createAccessGrant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/access/object-roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the object roles a grant may confer
+         * @description The object roles a grant may confer — viewer (visibility), editor (mutate), manager
+         *     (manage access). The oracle enforces each tier at its permission level.
+         */
+        get: operations["listObjectRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/access/enforcement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whether access control is enforcing
+         * @description The DB-latched activation state — the source of truth for whether enforcement is on.
+         *     Read-only: there is intentionally no enable/disable endpoint (enabling is the one-way env
+         *     switch; disabling is a deliberate ops action).
+         */
+        get: operations["getAccessEnforcement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/access/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List local (admin-managed) groups */
+        get: operations["listLocalGroups"];
+        put?: never;
+        /** Create a local (admin-managed) group */
+        post: operations["createLocalGroup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/access/groups/{group_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a local group (and sweep its grants) */
+        delete: operations["deleteLocalGroup"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/access/groups/{group_id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a user to a local group */
+        post: operations["addLocalGroupMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/access/groups/{group_id}/members/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a user from a local group */
+        delete: operations["removeLocalGroupMember"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/access/grants/{grant_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke an access grant */
+        delete: operations["deleteAccessGrant"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/access/objects/{object_type}/{object_id}/subjects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Who can access this object ("who can see X?")
+         * @description The audit read: the subjects currently granted access to the object (plus its
+         *     creator). Needs OBJ_MANAGE_ACCESS on the object. Administrators have
+         *     implicit access and are not enumerated.
+         */
+        get: operations["listObjectSubjects"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/annotation_configs": {
         parameters: {
             query?: never;
@@ -2388,6 +2563,17 @@ export interface components {
             /** Approval */
             approval?: components["schemas"]["ToolApprovalRequested"] | components["schemas"]["ToolApprovalResponded"] | null;
         };
+        /** Enforcement */
+        Enforcement: {
+            /** Enabled */
+            enabled: boolean;
+            /** Source */
+            source: string;
+        };
+        /** EnforcementResponseBody */
+        EnforcementResponseBody: {
+            data: components["schemas"]["Enforcement"];
+        };
         /** Experiment */
         Experiment: {
             /**
@@ -2697,6 +2883,49 @@ export interface components {
             /** Data */
             data: components["schemas"]["LocalUser"] | components["schemas"]["OAuth2User"] | components["schemas"]["LDAPUser"] | components["schemas"]["AnonymousUser"];
         };
+        /** Grant */
+        Grant: {
+            /** Id */
+            id: string;
+            subject: components["schemas"]["Subject"];
+            object_type: components["schemas"]["GrantObjectType"];
+            /** Object Id */
+            object_id: string | null;
+            /** Role */
+            role: string | null;
+        };
+        /** GrantCreate */
+        GrantCreate: {
+            subject: components["schemas"]["Subject"];
+            object_type: components["schemas"]["GrantObjectType"];
+            /** Object Id */
+            object_id?: string | null;
+            /** Role */
+            role?: string | null;
+        };
+        /**
+         * GrantObjectType
+         * @description The grantable access roots. Containment children and eval artifacts are
+         *     intentionally absent: their access is inherited from a parent, never granted directly.
+         * @enum {string}
+         */
+        GrantObjectType: "project" | "dataset" | "prompt";
+        /** GrantResponseBody */
+        GrantResponseBody: {
+            data: components["schemas"]["Grant"];
+        };
+        /**
+         * GrantSubjectKind
+         * @description Who a grant targets. ``everyone`` is the only kind with no id — a deliberate
+         *     'make this object visible to all' grant, not a seeded baseline.
+         * @enum {string}
+         */
+        GrantSubjectKind: "user" | "group" | "role" | "service_account" | "everyone";
+        /** GrantsResponseBody */
+        GrantsResponseBody: {
+            /** Data */
+            data: components["schemas"]["Grant"][];
+        };
         /**
          * GraphQLContext
          * @description GraphQL runtime state.
@@ -2709,6 +2938,29 @@ export interface components {
             type: "graphql";
             /** Mutationsenabled */
             mutationsEnabled: boolean;
+        };
+        /** GroupCreate */
+        GroupCreate: {
+            /** Name */
+            name: string;
+        };
+        /** GroupData */
+        GroupData: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Member User Ids */
+            member_user_ids: string[];
+        };
+        /** GroupResponseBody */
+        GroupResponseBody: {
+            data: components["schemas"]["GroupData"];
+        };
+        /** GroupsResponseBody */
+        GroupsResponseBody: {
+            /** Data */
+            data: components["schemas"]["GroupData"][];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -2931,6 +3183,11 @@ export interface components {
             /** Password */
             password?: string;
         };
+        /** MemberCreate */
+        MemberCreate: {
+            /** User Id */
+            user_id: string;
+        };
         /**
          * ModelProvider
          * @enum {string}
@@ -2991,6 +3248,22 @@ export interface components {
             oauth2_client_id?: string;
             /** Oauth2 User Id */
             oauth2_user_id?: string;
+        };
+        /** ObjectRoleData */
+        ObjectRoleData: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Is Built In */
+            is_built_in: boolean;
+            /** Permissions */
+            permissions: string[];
+        };
+        /** ObjectRolesResponseBody */
+        ObjectRolesResponseBody: {
+            /** Data */
+            data: components["schemas"]["ObjectRoleData"][];
         };
         /**
          * OptimizationDirection
@@ -4735,6 +5008,17 @@ export interface components {
             /** Enabled */
             enabled: boolean;
         };
+        /** Subject */
+        Subject: {
+            kind: components["schemas"]["GrantSubjectKind"];
+            /** Id */
+            id?: string | null;
+        };
+        /** SubjectsResponseBody */
+        SubjectsResponseBody: {
+            /** Data */
+            data: components["schemas"]["Subject"][];
+        };
         /** TextContentPart */
         TextContentPart: {
             /**
@@ -5469,6 +5753,491 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listAccessGrants: {
+        parameters: {
+            query?: {
+                object_type?: components["schemas"]["GrantObjectType"] | null;
+                /** @description Filter to one object (requires object_type). */
+                object_id?: string | null;
+                subject_kind?: components["schemas"]["GrantSubjectKind"] | null;
+                /** @description Filter to one subject (requires subject_kind). */
+                subject_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrantsResponseBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    createAccessGrant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GrantCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrantResponseBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    listObjectRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObjectRolesResponseBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    getAccessEnforcement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnforcementResponseBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    listLocalGroups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupsResponseBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    createLocalGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupResponseBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    deleteLocalGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The local group GlobalID */
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    addLocalGroupMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The local group GlobalID */
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemberCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupResponseBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    removeLocalGroupMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The local group GlobalID */
+                group_id: string;
+                /** @description The user GlobalID to remove */
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    deleteAccessGrant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The access grant GlobalID */
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    listObjectSubjects: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                object_type: components["schemas"]["GrantObjectType"];
+                /** @description The object GlobalID */
+                object_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectsResponseBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
     list_annotation_configs_v1_annotation_configs_get: {
         parameters: {
             query?: {
@@ -7789,6 +8558,24 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

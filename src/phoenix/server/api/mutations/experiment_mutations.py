@@ -2,7 +2,8 @@ import asyncio
 from datetime import datetime, timezone
 
 import strawberry
-from sqlalchemy import delete, or_, update
+from sqlalchemy import delete, or_, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 from strawberry import UNSET
 from strawberry.relay import GlobalID
 from strawberry.types import Info
@@ -10,9 +11,10 @@ from strawberry.types import Info
 from phoenix.config import EXPERIMENT_TOGGLE_COOLDOWN
 from phoenix.db import models
 from phoenix.db.helpers import get_eval_trace_ids_for_experiments, get_project_names_for_experiments
+from phoenix.server.access import OBJECT_TYPE_DATASET, Permission, can_access
 from phoenix.server.api.auth import IsLocked, IsNotReadOnly, IsNotViewer
 from phoenix.server.api.context import Context
-from phoenix.server.api.exceptions import BadRequest, CustomGraphQLError
+from phoenix.server.api.exceptions import BadRequest, CustomGraphQLError, NotFound
 from phoenix.server.api.input_types.DeleteExperimentsInput import DeleteExperimentsInput
 from phoenix.server.api.input_types.GenerativeCredentialInput import GenerativeCredentialInput
 from phoenix.server.api.input_types.PatchExperimentInput import PatchExperimentInput
@@ -53,6 +55,71 @@ class PatchExperimentPayload:
     experiment: Experiment
 
 
+async def _assert_can_edit_experiment(
+    info: Info[Context, None],
+    session: AsyncSession,
+    experiment_id: int,
+    experiment_gid: GlobalID,
+) -> None:
+    user_id = info.context.user_id
+    if not info.context.access_control_enabled or user_id is None:
+        return
+    dataset_id = await session.scalar(
+        select(models.Experiment.dataset_id).where(models.Experiment.id == experiment_id)
+    )
+    if dataset_id is None:
+        raise NotFound(f"Experiment {experiment_gid} not found")
+    if not await can_access(
+        session,
+        user_id=user_id,
+        object_type=OBJECT_TYPE_DATASET,
+        object_id=dataset_id,
+        enabled=True,
+        permission=Permission.OBJ_EDIT,
+    ):
+        raise NotFound(f"Experiment {experiment_gid} not found")
+
+
+async def _assert_can_edit_experiments(
+    info: Info[Context, None], session: AsyncSession, experiment_ids: list[int]
+) -> None:
+    user_id = info.context.user_id
+    if not info.context.access_control_enabled or user_id is None:
+        return
+    rows = (
+        await session.execute(
+            select(models.Experiment.id, models.Experiment.dataset_id).where(
+                models.Experiment.id.in_(experiment_ids)
+            )
+        )
+    ).all()
+    dataset_id_by_experiment_id = {experiment_id: dataset_id for experiment_id, dataset_id in rows}
+    unknown_experiment_ids = set(experiment_ids) - set(dataset_id_by_experiment_id)
+    if unknown_experiment_ids:
+        raise NotFound(
+            "Unknown experiment(s): "
+            + str(
+                [
+                    str(GlobalID(Experiment.__name__, str(experiment_id)))
+                    for experiment_id in sorted(unknown_experiment_ids)
+                ]
+            )
+        )
+    for experiment_id in experiment_ids:
+        dataset_id = dataset_id_by_experiment_id[experiment_id]
+        if not await can_access(
+            session,
+            user_id=user_id,
+            object_type=OBJECT_TYPE_DATASET,
+            object_id=dataset_id,
+            enabled=True,
+            permission=Permission.OBJ_EDIT,
+        ):
+            raise NotFound(
+                f"Experiment {GlobalID(Experiment.__name__, str(experiment_id))} not found"
+            )
+
+
 @strawberry.type
 class ExperimentMutationMixin:
     @strawberry.mutation(permission_classes=[IsNotReadOnly, IsNotViewer])  # type: ignore
@@ -71,6 +138,7 @@ class ExperimentMutationMixin:
         now = datetime.now(timezone.utc)
 
         async with info.context.db() as session:
+            await _assert_can_edit_experiment(info, session, exp_rowid, experiment_id)
             # Single atomic UPDATE: state guard + cooldown in one statement
             stmt = (
                 update(models.ExperimentJob)
@@ -126,6 +194,7 @@ class ExperimentMutationMixin:
         replica_id = info.context.experiment_runner.replica_id
 
         async with info.context.db() as session:
+            await _assert_can_edit_experiment(info, session, exp_rowid, experiment_id)
             # Single atomic UPDATE: state guard + cooldown in one statement
             # NOTE: COMPLETED experiments are resumable — the runner scans for
             # incomplete/errored runs, so resuming retries failures or picks up new examples.
@@ -182,6 +251,7 @@ class ExperimentMutationMixin:
         """
         exp_rowid = from_global_id_with_expected_type(experiment_id, Experiment.__name__)
         async with info.context.db() as session:
+            await _assert_can_edit_experiment(info, session, exp_rowid, experiment_id)
             stmt = (
                 update(models.Experiment)
                 .where(models.Experiment.id == exp_rowid)
@@ -204,6 +274,7 @@ class ExperimentMutationMixin:
         """
         exp_rowid = from_global_id_with_expected_type(experiment_id, Experiment.__name__)
         async with info.context.db() as session:
+            await _assert_can_edit_experiment(info, session, exp_rowid, experiment_id)
             stmt = (
                 update(models.Experiment)
                 .where(models.Experiment.id == exp_rowid)
@@ -241,6 +312,7 @@ class ExperimentMutationMixin:
         if not patch:
             raise BadRequest("No fields to patch.")
         async with info.context.db() as session:
+            await _assert_can_edit_experiment(info, session, experiment_id, input.experiment_id)
             experiment = await session.scalar(
                 update(models.Experiment)
                 .where(models.Experiment.id == experiment_id)
@@ -267,6 +339,8 @@ class ExperimentMutationMixin:
         # deployments, another replica's shielded writes may still race with
         # the DELETE (possible FK errors or orphaned rows), but these are
         # harmless since the experiment is being deleted anyway.
+        async with info.context.db() as session:
+            await _assert_can_edit_experiments(info, session, experiment_ids)
         for exp_id in experiment_ids:
             await info.context.experiment_runner.stop_experiment(exp_id)
         project_names_stmt = get_project_names_for_experiments(*experiment_ids)

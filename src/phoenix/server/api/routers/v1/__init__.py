@@ -7,6 +7,8 @@ from phoenix.server.authorization import (
 )
 from phoenix.server.bearer_auth import is_authenticated
 
+from .access import owner_router as access_owner_router
+from .access import router as access_router
 from .annotation_configs import router as annotation_configs_router
 from .annotations import router as annotations_router
 from .datasets import router as datasets_router
@@ -26,7 +28,11 @@ from .utils import add_errors_to_responses
 REST_API_VERSION = "1.0"
 
 
-def create_v1_router(authentication_enabled: bool) -> APIRouter:
+def create_v1_router(
+    authentication_enabled: bool,
+    *,
+    access_control_enabled: bool = True,
+) -> APIRouter:
     """
     Instantiates the v1 REST API router.
     """
@@ -54,6 +60,9 @@ def create_v1_router(authentication_enabled: bool) -> APIRouter:
             ]
         ),
     )
+    if access_control_enabled:
+        router.include_router(access_router)
+        router.include_router(access_owner_router)
     router.include_router(annotation_configs_router)
     router.include_router(annotations_router)
     router.include_router(datasets_router)

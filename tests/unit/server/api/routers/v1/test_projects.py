@@ -661,6 +661,7 @@ class TestProjects:
             experiment_project = models.Project(
                 name="experiment-project",
                 description="A project created from an experiment - should be filtered by default",
+                kind="EXPERIMENT",
             )
             session.add(experiment_project)
             await session.flush()
@@ -684,7 +685,7 @@ class TestProjects:
                 name="test-experiment",
                 repetitions=1,
                 metadata_={},
-                project_name="experiment-project",
+                project_id=experiment_project.id,
             )
             session.add(experiment)
             await session.flush()
@@ -693,6 +694,7 @@ class TestProjects:
             playground_project = models.Project(
                 name=PLAYGROUND_PROJECT_NAME,
                 description="Playground project - should always be visible",
+                kind="PLAYGROUND",
             )
             session.add(playground_project)
             await session.flush()
@@ -786,6 +788,7 @@ class TestProjects:
             dataset_evaluator_project = models.Project(
                 name="dataset-evaluator-project",
                 description="A project created from a dataset evaluator - should be filtered by default",
+                kind="EVALUATOR",
             )
             session.add(dataset_evaluator_project)
             await session.flush()

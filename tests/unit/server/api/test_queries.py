@@ -670,12 +670,13 @@ async def projects_with_and_without_experiments(
                 description="non-experiment-project-description",
             )
         )
-        await session.scalar(
+        experiment_project_id = await session.scalar(
             insert(models.Project)
             .returning(models.Project.id)
             .values(
                 name="experiment-project-name",
                 description="experiment-project-description",
+                kind="EXPERIMENT",
             )
         )
         dataset_id = await session.scalar(
@@ -697,7 +698,7 @@ async def projects_with_and_without_experiments(
                 name="experiment-name",
                 repetitions=1,
                 metadata_={},
-                project_name="experiment-project-name",
+                project_id=experiment_project_id,
             )
         )
 
@@ -718,6 +719,7 @@ async def projects_with_and_without_dataset_evaluators(
         dataset_evaluator_project = models.Project(
             name="dataset-evaluator-project-name",
             description="dataset-evaluator-project-description",
+            kind="EVALUATOR",
         )
         session.add(non_dataset_evaluator_project)
         session.add(dataset_evaluator_project)

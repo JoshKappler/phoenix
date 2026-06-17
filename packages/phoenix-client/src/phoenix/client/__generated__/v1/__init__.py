@@ -148,6 +148,15 @@ class DeleteSessionsRequestBody(TypedDict):
     session_identifiers: Sequence[str]
 
 
+class Enforcement(TypedDict):
+    enabled: bool
+    source: str
+
+
+class EnforcementResponseBody(TypedDict):
+    data: Enforcement
+
+
 class Experiment(TypedDict):
     id: str
     dataset_id: str
@@ -202,6 +211,24 @@ class GetExperimentResponseBody(TypedDict):
 class GraphQLContext(TypedDict):
     type: Literal["graphql"]
     mutationsEnabled: bool
+
+
+class GroupCreate(TypedDict):
+    name: str
+
+
+class GroupData(TypedDict):
+    id: str
+    name: str
+    member_user_ids: Sequence[str]
+
+
+class GroupResponseBody(TypedDict):
+    data: GroupData
+
+
+class GroupsResponseBody(TypedDict):
+    data: Sequence[GroupData]
 
 
 class IncompleteExperimentEvaluation(TypedDict):
@@ -299,6 +326,10 @@ class LocalUser(LocalUserData):
     password_needs_reset: bool
 
 
+class MemberCreate(TypedDict):
+    user_id: str
+
+
 class OAuth2UserData(TypedDict):
     email: str
     username: str
@@ -313,6 +344,17 @@ class OAuth2User(OAuth2UserData):
     created_at: str
     updated_at: str
     profile_picture_url: NotRequired[str]
+
+
+class ObjectRoleData(TypedDict):
+    id: str
+    name: str
+    is_built_in: bool
+    permissions: Sequence[str]
+
+
+class ObjectRolesResponseBody(TypedDict):
+    data: Sequence[ObjectRoleData]
 
 
 class OtlpStatus(TypedDict):
@@ -748,6 +790,15 @@ class StepStartUIPart(TypedDict):
 class SubagentsContext(TypedDict):
     type: Literal["subagents"]
     enabled: bool
+
+
+class Subject(TypedDict):
+    kind: Literal["user", "group", "role", "service_account", "everyone"]
+    id: NotRequired[str]
+
+
+class SubjectsResponseBody(TypedDict):
+    data: Sequence[Subject]
 
 
 class TextContentPart(TypedDict):
@@ -1276,6 +1327,29 @@ class GetUsersResponseBody(TypedDict):
 
 class GetViewerResponseBody(TypedDict):
     data: Union[LocalUser, OAuth2User, LDAPUser, AnonymousUser]
+
+
+class Grant(TypedDict):
+    id: str
+    subject: Subject
+    object_type: Literal["project", "dataset", "prompt"]
+    object_id: Optional[str]
+    role: Optional[str]
+
+
+class GrantCreate(TypedDict):
+    subject: Subject
+    object_type: Literal["project", "dataset", "prompt"]
+    object_id: NotRequired[str]
+    role: NotRequired[str]
+
+
+class GrantResponseBody(TypedDict):
+    data: Grant
+
+
+class GrantsResponseBody(TypedDict):
+    data: Sequence[Grant]
 
 
 class HTTPValidationError(TypedDict):

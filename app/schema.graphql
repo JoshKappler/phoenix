@@ -53,6 +53,48 @@ input AWSBedrockCustomProviderConfigInput {
   awsBedrockClientKwargs: AWSBedrockClientKwargsInput!
 }
 
+type AccessGrant {
+  subjectKind: AccessSubjectKind!
+  subjectId: ID
+  subjectName: String!
+  roleId: ID
+  roleName: String!
+}
+
+input AccessGrantInput {
+  subject: AccessGrantSubjectInput!
+  object: AccessGrantObjectInput!
+  permissionSetId: ID
+}
+
+type AccessGrantMutationPayload {
+  query: Query!
+}
+
+input AccessGrantObjectInput @oneOf {
+  projectId: ID
+  datasetId: ID
+  promptId: ID
+}
+
+input AccessGrantSubjectInput @oneOf {
+  userId: ID
+  userGroupId: ID
+  isEveryone: Boolean
+}
+
+enum AccessSubjectKind {
+  USER
+  GROUP
+  EVERYONE
+}
+
+type AccessibleObjectRef {
+  kind: String!
+  id: ID!
+  name: String!
+}
+
 input AddAnnotationConfigToProjectInput {
   projectId: ID!
   annotationConfigId: ID!
@@ -335,6 +377,10 @@ interface ApiKey {
 
   """The date and time the API key will expire."""
   expiresAt: DateTime
+}
+
+enum ApiKeyScope {
+  INGEST
 }
 
 enum AuthMethod {
@@ -687,6 +733,7 @@ input CreateApiKeyInput {
   name: String!
   description: String
   expiresAt: DateTime
+  scope: ApiKeyScope
 }
 
 input CreateChatPromptInput {
@@ -827,6 +874,11 @@ type CreateModelMutationPayload {
   query: Query!
 }
 
+input CreatePermissionSetInput {
+  name: String!
+  permissions: [ObjectPermission!]!
+}
+
 input CreateProjectInput {
   name: String!
   description: String
@@ -916,6 +968,7 @@ input CreateUserApiKeyInput {
   name: String!
   description: String
   expiresAt: DateTime
+  scope: ApiKeyScope
 }
 
 type CreateUserApiKeyMutationPayload {
@@ -940,6 +993,7 @@ union CustomProviderConfig = OpenAICustomProviderConfig | AzureOpenAICustomProvi
 type Dataset implements Node {
   """The Globally Unique ID of this object"""
   id: ID!
+  accessGrants: [AccessGrant!]!
   name: String!
   description: String
   metadata: JSON!
@@ -1384,6 +1438,10 @@ input DeleteProjectAnnotationsInput {
   Which timestamp the time range is applied against. Defaults to the annotation's own creation time.
   """
   timeRangeField: AnnotationTimeRangeField! = ANNOTATION_CREATED_AT
+}
+
+input DeletePermissionSetInput {
+  id: ID!
 }
 
 input DeleteProjectTraceRetentionPolicyInput {
@@ -2372,6 +2430,8 @@ input ModelsInput {
 }
 
 type Mutation {
+  grantAccess(input: AccessGrantInput!): AccessGrantMutationPayload!
+  revokeAccess(input: AccessGrantInput!): AccessGrantMutationPayload!
   createAnnotationConfig(input: CreateAnnotationConfigInput!): CreateAnnotationConfigPayload!
   updateAnnotationConfig(input: UpdateAnnotationConfigInput!): UpdateAnnotationConfigPayload!
   deleteAnnotationConfigs(input: DeleteAnnotationConfigsInput!): DeleteAnnotationConfigsPayload!
@@ -2447,6 +2507,9 @@ type Mutation {
   Delete every session annotation with the given name in a project, optionally restricted to a time range. Admin only when auth is enabled.
   """
   deleteProjectSessionAnnotations(input: DeleteProjectAnnotationsInput!): DeleteProjectAnnotationsByNamePayload!
+  createPermissionSet(input: CreatePermissionSetInput!): PermissionSetMutationPayload!
+  patchPermissionSet(input: PatchPermissionSetInput!): PermissionSetMutationPayload!
+  deletePermissionSet(input: DeletePermissionSetInput!): PermissionSetMutationPayload!
   createProject(input: CreateProjectInput!): ProjectMutationPayload!
   deleteProject(id: ID!): Query!
   clearProject(input: ClearProjectInput!): Query!
@@ -2485,6 +2548,10 @@ type Mutation {
   deleteTraceAnnotations(input: DeleteAnnotationsInput!): TraceAnnotationMutationPayload!
   deleteTraces(traceIds: [ID!]!): Query!
   transferTracesToProject(traceIds: [ID!]!, projectId: ID!): Query!
+  createUserGroup(name: String!): UserGroupMutationPayload!
+  deleteUserGroup(groupId: Int!): UserGroupMutationPayload!
+  addUserGroupMember(groupId: Int!, userId: Int!): UserGroupMutationPayload!
+  removeUserGroupMember(groupId: Int!, userId: Int!): UserGroupMutationPayload!
   createUser(input: CreateUserInput!): UserMutationPayload!
   patchUser(input: PatchUserInput!): UserMutationPayload!
   patchViewer(input: PatchViewerInput!): UserMutationPayload!
@@ -2495,6 +2562,12 @@ type Mutation {
 interface Node {
   """The Globally Unique ID of this object"""
   id: ID!
+}
+
+enum ObjectPermission {
+  VIEW
+  EDIT
+  MANAGE_ACCESS
 }
 
 enum OpenAIApiType {
@@ -2651,6 +2724,12 @@ type PatchGenerativeModelCustomProviderMutationPayload {
   query: Query!
 }
 
+input PatchPermissionSetInput {
+  id: ID!
+  name: String
+  permissions: [ObjectPermission!]
+}
+
 input PatchProjectInput {
   id: ID!
   description: String
@@ -2692,6 +2771,19 @@ input PatchViewerInput {
   currentPassword: String
 }
 
+type PermissionSet implements Node {
+  """The Globally Unique ID of this object"""
+  id: ID!
+  name: String!
+  isBuiltIn: Boolean!
+  permissions: [ObjectPermission!]!
+}
+
+type PermissionSetMutationPayload {
+  permissionSet: PermissionSet
+  query: Query!
+}
+
 type PlaygroundConfig {
   templateVariablesPath: String
   appendedMessagesPath: String
@@ -2714,6 +2806,8 @@ type Project implements Node {
   """The Globally Unique ID of this object"""
   id: ID!
   name: String!
+  accessGrants: [AccessGrant!]!
+  accessPosture: ProjectAccessPosture!
   description: String
   gradientStartColor: String!
   gradientEndColor: String!
@@ -2786,6 +2880,12 @@ type Project implements Node {
   sessionAnnotationScoreTimeSeries(timeRange: TimeRange!, timeBinConfig: TimeBinConfig): AnnotationScoreTimeSeries!
   topModelsByCost(timeRange: TimeRange!): [GenerativeModel!]!
   topModelsByTokenCount(timeRange: TimeRange!): [GenerativeModel!]!
+}
+
+enum ProjectAccessPosture {
+  ADMINS_ONLY
+  SHARED
+  ALL_USERS
 }
 
 enum ProjectColumn {
@@ -3004,6 +3104,7 @@ input ProjectTraceRetentionRuleMaxDaysOrCountInput {
 type Prompt implements Node {
   """The Globally Unique ID of this object"""
   id: ID!
+  accessGrants: [AccessGrant!]!
   sourcePromptId: ID
   name: Identifier!
   description: String
@@ -3456,12 +3557,14 @@ type Query {
   secrets(keys: [String!] = null, first: Int = 50, last: Int, after: String, before: String): SecretConnection!
   generativeModels(first: Int = 50, last: Int, after: String, before: String): GenerativeModelConnection!
   playgroundModels(input: ModelsInput = null): [PlaygroundModel!]!
-  users(first: Int = 50, last: Int, after: String, before: String): UserConnection!
+  users(first: Int = 50, last: Int, after: String, before: String, filter: UserFilter): UserConnection!
   userRoles: [UserRole!]!
   userApiKeys: [UserApiKey!]!
   systemApiKeys: [SystemApiKey!]!
   projects(first: Int = 50, last: Int, after: String, before: String, sort: ProjectSort, filter: ProjectFilter): ProjectConnection!
   projectsLastUpdatedAt: DateTime
+  permissionSets: [PermissionSet!]!
+  userGroups(localOnly: Boolean! = false): [UserGroup!]!
   datasets(first: Int = 50, last: Int, after: String, before: String, sort: DatasetSort, filter: DatasetFilter): DatasetConnection!
   datasetsLastUpdatedAt: DateTime
   compareExperiments(baseExperimentId: ID!, compareExperimentIds: [ID!]!, first: Int = 50, after: String, filterCondition: String): ExperimentComparisonConnection!
@@ -4576,6 +4679,16 @@ type User implements Node {
   role: UserRole!
   apiKeys: [UserApiKey!]!
   isManagementUser: Boolean!
+  accessSummary: UserAccessSummary!
+}
+
+type UserAccessSummary {
+  enforced: Boolean!
+  isAdmin: Boolean!
+  allProjects: Boolean!
+  allDatasets: Boolean!
+  allPrompts: Boolean!
+  objects: [AccessibleObjectRef!]!
 }
 
 type UserApiKey implements ApiKey & Node {
@@ -4612,6 +4725,26 @@ type UserEdge {
 
   """The item at the end of the edge"""
   node: User!
+}
+
+"""A filter for users"""
+input UserFilter {
+  value: String = null
+}
+
+type UserGroup implements Node {
+  """The Globally Unique ID of this object"""
+  id: ID!
+  groupId: Int!
+  name: String!
+  provider: String!
+  isLocal: Boolean!
+  memberUserIds: [Int!]!
+}
+
+type UserGroupMutationPayload {
+  query: Query!
+  userGroup: UserGroup
 }
 
 type UserMutationPayload {

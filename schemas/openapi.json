@@ -6,6 +6,660 @@
     "version": "1.0"
   },
   "paths": {
+    "/v1/access/grants": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "List access grants",
+        "operationId": "listAccessGrants",
+        "parameters": [
+          {
+            "name": "object_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/GrantObjectType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Object Type"
+            }
+          },
+          {
+            "name": "object_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to one object (requires object_type).",
+              "title": "Object Id"
+            },
+            "description": "Filter to one object (requires object_type)."
+          },
+          {
+            "name": "subject_kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/GrantSubjectKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Subject Kind"
+            }
+          },
+          {
+            "name": "subject_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to one subject (requires subject_kind).",
+              "title": "Subject Id"
+            },
+            "description": "Filter to one subject (requires subject_kind)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantsResponseBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Author an access grant (allow-only, idempotent)",
+        "description": "Grant a subject access to an object (or, with ``object_id`` omitted, to every\nobject of that type). Monotonic and allow-only: grants only ever *add* access.\nIdempotent \u2014 re-granting the same subject+object updates only the role. Authoring a grant\non a specific object needs OBJ_MANAGE_ACCESS on it; a type-wide grant is admin-only.",
+        "operationId": "createAccessGrant",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantResponseBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        }
+      }
+    },
+    "/v1/access/object-roles": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "List the permission sets a grant may confer",
+        "description": "The permission sets a grant may confer \u2014 viewer (visibility), editor (mutate), manager\n(manage access). The oracle enforces each tier at its permission level.",
+        "operationId": "listPermissionSets",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionSetsResponseBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/access/enforcement": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Whether access control is enforcing",
+        "description": "The DB-latched activation state \u2014 the source of truth for whether enforcement is on.\nRead-only: there is intentionally no enable/disable endpoint (enabling is the one-way env\nswitch; disabling is a deliberate ops action).",
+        "operationId": "getAccessEnforcement",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnforcementResponseBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/access/groups": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "List local (admin-managed) groups",
+        "operationId": "listLocalGroups",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupsResponseBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Create a local (admin-managed) group",
+        "operationId": "createLocalGroup",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupResponseBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/access/groups/{group_id}": {
+      "delete": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Delete a local group (and sweep its grants)",
+        "operationId": "deleteLocalGroup",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The local group GlobalID",
+              "title": "Group Id"
+            },
+            "description": "The local group GlobalID"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        }
+      }
+    },
+    "/v1/access/groups/{group_id}/members": {
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Add a user to a local group",
+        "operationId": "addLocalGroupMember",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The local group GlobalID",
+              "title": "Group Id"
+            },
+            "description": "The local group GlobalID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupResponseBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        }
+      }
+    },
+    "/v1/access/groups/{group_id}/members/{user_id}": {
+      "delete": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Remove a user from a local group",
+        "operationId": "removeLocalGroupMember",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The local group GlobalID",
+              "title": "Group Id"
+            },
+            "description": "The local group GlobalID"
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The user GlobalID to remove",
+              "title": "User Id"
+            },
+            "description": "The user GlobalID to remove"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        }
+      }
+    },
+    "/v1/access/grants/{grant_id}": {
+      "delete": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Revoke an access grant",
+        "operationId": "deleteAccessGrant",
+        "parameters": [
+          {
+            "name": "grant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The access grant GlobalID",
+              "title": "Grant Id"
+            },
+            "description": "The access grant GlobalID"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        }
+      }
+    },
+    "/v1/access/objects/{object_type}/{object_id}/subjects": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Who can access this object (\"who can see X?\")",
+        "description": "The audit read: the subjects currently granted access to the object (plus its\ncreator). Needs OBJ_MANAGE_ACCESS on the object. Administrators have\nimplicit access and are not enumerated.",
+        "operationId": "listObjectSubjects",
+        "parameters": [
+          {
+            "name": "object_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/GrantObjectType"
+            }
+          },
+          {
+            "name": "object_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The object GlobalID",
+              "title": "Object Id"
+            },
+            "description": "The object GlobalID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubjectsResponseBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        }
+      }
+    },
     "/v1/annotation_configs": {
       "get": {
         "tags": [
@@ -4435,6 +5089,26 @@
               }
             },
             "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -9251,6 +9925,36 @@
         "title": "DynamicToolOutputErrorPart",
         "description": "Dynamic tool part in output-error state."
       },
+      "Enforcement": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "source"
+        ],
+        "title": "Enforcement"
+      },
+      "EnforcementResponseBody": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Enforcement"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "EnforcementResponseBody"
+      },
       "Experiment": {
         "properties": {
           "id": {
@@ -10124,6 +10828,139 @@
         ],
         "title": "GetViewerResponseBody"
       },
+      "Grant": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "subject": {
+            "$ref": "#/components/schemas/Subject"
+          },
+          "object_type": {
+            "$ref": "#/components/schemas/GrantObjectType"
+          },
+          "object_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Id"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "subject",
+          "object_type",
+          "object_id",
+          "role"
+        ],
+        "title": "Grant"
+      },
+      "GrantCreate": {
+        "properties": {
+          "subject": {
+            "$ref": "#/components/schemas/Subject"
+          },
+          "object_type": {
+            "$ref": "#/components/schemas/GrantObjectType"
+          },
+          "object_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Id"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "subject",
+          "object_type"
+        ],
+        "title": "GrantCreate"
+      },
+      "GrantObjectType": {
+        "type": "string",
+        "enum": [
+          "project",
+          "dataset",
+          "prompt"
+        ],
+        "title": "GrantObjectType",
+        "description": "The grantable access roots. Containment children and eval artifacts are\nintentionally absent: their access is inherited from a parent, never granted directly."
+      },
+      "GrantResponseBody": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Grant"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "GrantResponseBody"
+      },
+      "GrantSubjectKind": {
+        "type": "string",
+        "enum": [
+          "user",
+          "group",
+          "role",
+          "service_account",
+          "everyone"
+        ],
+        "title": "GrantSubjectKind",
+        "description": "Who a grant targets. ``everyone`` is the only kind with no id \u2014 a deliberate\n'make this object visible to all' grant, not a seeded baseline."
+      },
+      "GrantsResponseBody": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Grant"
+            },
+            "type": "array",
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "GrantsResponseBody"
+      },
       "GraphQLContext": {
         "properties": {
           "type": {
@@ -10143,6 +10980,73 @@
         ],
         "title": "GraphQLContext",
         "description": "GraphQL runtime state."
+      },
+      "GroupCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "GroupCreate"
+      },
+      "GroupData": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "member_user_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Member User Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "member_user_ids"
+        ],
+        "title": "GroupData"
+      },
+      "GroupResponseBody": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GroupData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "GroupResponseBody"
+      },
+      "GroupsResponseBody": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/GroupData"
+            },
+            "type": "array",
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "GroupsResponseBody"
       },
       "HTTPValidationError": {
         "properties": {
@@ -10638,6 +11542,19 @@
           "auth_method"
         ],
         "title": "LocalUserData"
+      },
+      "MemberCreate": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id"
+        ],
+        "title": "MemberCreate"
       },
       "ModelProvider": {
         "type": "string",
@@ -11287,6 +12204,53 @@
         "additionalProperties": false,
         "type": "object",
         "title": "OtlpStatus"
+      },
+      "PermissionSetData": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "is_built_in": {
+            "type": "boolean",
+            "title": "Is Built In"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Permissions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "is_built_in",
+          "permissions"
+        ],
+        "title": "PermissionSetData"
+      },
+      "PermissionSetsResponseBody": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PermissionSetData"
+            },
+            "type": "array",
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "PermissionSetsResponseBody"
       },
       "PlaygroundBuiltinModelContext": {
         "properties": {
@@ -14650,6 +15614,45 @@
         ],
         "title": "SubagentsContext",
         "description": "User's per-turn request to expose the subagent-spawning tool."
+      },
+      "Subject": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/GrantSubjectKind"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "Subject"
+      },
+      "SubjectsResponseBody": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Subject"
+            },
+            "type": "array",
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SubjectsResponseBody"
       },
       "TextContentPart": {
         "properties": {

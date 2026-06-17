@@ -7,6 +7,7 @@ from typing import cast as type_cast
 
 import strawberry
 from sqlalchemy import ColumnElement, String, and_, case, cast, exists, func, or_, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, load_only, with_polymorphic
 from starlette.authentication import UnauthenticatedUser
 from strawberry import UNSET
@@ -33,6 +34,11 @@ from phoenix.db.helpers import (
 from phoenix.db.models import LatencyMs
 from phoenix.db.types.annotation_configs import OptimizationDirection
 from phoenix.db.types.prompts import PromptMessageRole
+from phoenix.server.access import (
+    OBJECT_TYPE_DATASET,
+    OBJECT_TYPE_PROJECT,
+    OBJECT_TYPE_PROMPT,
+)
 from phoenix.server.api.auth import MSG_ADMIN_ONLY, IsAdmin
 from phoenix.server.api.context import Context
 from phoenix.server.api.evaluators import (
@@ -67,6 +73,7 @@ from phoenix.server.api.input_types.ProjectSort import ProjectColumn, ProjectSor
 from phoenix.server.api.input_types.PromptFilter import PromptFilter
 from phoenix.server.api.input_types.PromptTemplateOptions import PromptTemplateOptions
 from phoenix.server.api.input_types.PromptVersionInput import PromptChatTemplateInput
+from phoenix.server.api.input_types.UserFilter import UserFilter
 from phoenix.server.api.types.AgentsConfig import AgentsConfig
 from phoenix.server.api.types.AgentSkill import AgentSkill
 from phoenix.server.api.types.AnnotationConfig import AnnotationConfig, to_gql_annotation_config
@@ -108,6 +115,7 @@ from phoenix.server.api.types.pagination import (
     connection_from_cursors_and_nodes,
     connection_from_list,
 )
+from phoenix.server.api.types.PermissionSet import PermissionSet, to_gql_permission_set
 from phoenix.server.api.types.PlaygroundModel import PlaygroundModel
 from phoenix.server.api.types.Project import Project
 from phoenix.server.api.types.ProjectSession import ProjectSession
@@ -144,6 +152,7 @@ from phoenix.server.api.types.Trace import Trace
 from phoenix.server.api.types.TraceAnnotation import TraceAnnotation
 from phoenix.server.api.types.User import User
 from phoenix.server.api.types.UserApiKey import UserApiKey
+from phoenix.server.api.types.UserGroup import LOCAL_PROVIDER, UserGroup, to_gql_user_group
 from phoenix.server.api.types.UserRole import UserRole
 from phoenix.server.api.types.ValidationResult import ValidationResult
 from phoenix.server.sandbox.types import SANDBOX_BACKEND_TYPES
@@ -212,6 +221,158 @@ class ExperimentRunMetricComparisons:
     total_cost: ExperimentRunMetricComparison
     prompt_cost: ExperimentRunMetricComparison
     completion_cost: ExperimentRunMetricComparison
+
+
+async def _parent_project_id(
+    session: "AsyncSession", type_name: str, node_id: int
+) -> Optional[int]:
+    """The project a containment child belongs to, walking the containment edges.
+    Annotations are reached through their span/trace; access derives from the project,
+    never an independent grant on the child itself."""
+    if type_name == Trace.__name__:
+        return type_cast(
+            Optional[int],
+            await session.scalar(
+                select(models.Trace.project_rowid).where(models.Trace.id == node_id)
+            ),
+        )
+    if type_name == Span.__name__:
+        return type_cast(
+            Optional[int],
+            await session.scalar(
+                select(models.Trace.project_rowid)
+                .join(models.Span, models.Span.trace_rowid == models.Trace.id)
+                .where(models.Span.id == node_id)
+            ),
+        )
+    if type_name == ProjectSession.__name__:
+        return type_cast(
+            Optional[int],
+            await session.scalar(
+                select(models.ProjectSession.project_id).where(models.ProjectSession.id == node_id)
+            ),
+        )
+    if type_name == SpanAnnotation.__name__:
+        return type_cast(
+            Optional[int],
+            await session.scalar(
+                select(models.Trace.project_rowid)
+                .join(models.Span, models.Span.trace_rowid == models.Trace.id)
+                .join(models.SpanAnnotation, models.SpanAnnotation.span_rowid == models.Span.id)
+                .where(models.SpanAnnotation.id == node_id)
+            ),
+        )
+    if type_name == TraceAnnotation.__name__:
+        return type_cast(
+            Optional[int],
+            await session.scalar(
+                select(models.Trace.project_rowid)
+                .join(models.TraceAnnotation, models.TraceAnnotation.trace_rowid == models.Trace.id)
+                .where(models.TraceAnnotation.id == node_id)
+            ),
+        )
+    return None
+
+
+async def _containment_readable(info: Info[Context, None], type_name: str, node_id: int) -> bool:
+    """Whether a containment child (span/trace/session/annotation) is readable — via
+    its parent project's accessibility. Short-circuits when the actor sees everything."""
+    async with info.context.db.read() as session:
+        scope = await info.context.access_scope(session, OBJECT_TYPE_PROJECT)
+        if scope.everything or scope.type_allows:
+            return True
+        project_id = await _parent_project_id(session, type_name, node_id)
+    return project_id is not None and scope.allows(project_id)
+
+
+async def _gate_containment_node(
+    info: Info[Context, None], type_name: str, node_id: int, gid: strawberry.ID
+) -> None:
+    """Gate a containment-child node fetch by its parent project's accessibility.
+    Unauthorized is indistinguishable from not-found."""
+    if not await _containment_readable(info, type_name, node_id):
+        raise NotFound(f"Unknown node: {gid}")
+
+
+# The eval-world nodes derive access from their data context: dataset-rooted (experiments,
+# runs, jobs, examples) or prompt-rooted (prompt versions). They never carry their own grant.
+_EVAL_NODE_OBJECT_TYPE: dict[str, str] = {
+    "DatasetExample": OBJECT_TYPE_DATASET,
+    "Experiment": OBJECT_TYPE_DATASET,
+    "ExperimentRun": OBJECT_TYPE_DATASET,
+    "ExperimentJob": OBJECT_TYPE_DATASET,
+    "PromptVersion": OBJECT_TYPE_PROMPT,
+}
+
+
+async def _eval_node_parent_id(
+    session: "AsyncSession", type_name: str, node_id: int
+) -> Optional[int]:
+    """The dataset/prompt id an eval-world node derives access from (access-by-parent)."""
+    if type_name == "DatasetExample":
+        return type_cast(
+            Optional[int],
+            await session.scalar(
+                select(models.DatasetExample.dataset_id).where(models.DatasetExample.id == node_id)
+            ),
+        )
+    if type_name == "Experiment":
+        return type_cast(
+            Optional[int],
+            await session.scalar(
+                select(models.Experiment.dataset_id).where(models.Experiment.id == node_id)
+            ),
+        )
+    if type_name == "ExperimentRun":
+        return type_cast(
+            Optional[int],
+            await session.scalar(
+                select(models.Experiment.dataset_id)
+                .join(
+                    models.ExperimentRun, models.ExperimentRun.experiment_id == models.Experiment.id
+                )
+                .where(models.ExperimentRun.id == node_id)
+            ),
+        )
+    if type_name == "ExperimentJob":
+        # experiment_jobs.id is a 1:1 FK to experiments.id.
+        return type_cast(
+            Optional[int],
+            await session.scalar(
+                select(models.Experiment.dataset_id).where(models.Experiment.id == node_id)
+            ),
+        )
+    if type_name == "PromptVersion":
+        return type_cast(
+            Optional[int],
+            await session.scalar(
+                select(models.PromptVersion.prompt_id).where(models.PromptVersion.id == node_id)
+            ),
+        )
+    return None
+
+
+async def _eval_readable(info: Info[Context, None], type_name: str, node_id: int) -> bool:
+    """Whether an eval-world node (experiment/run/job/example/prompt-version) is readable
+    — via its parent dataset's or prompt's accessibility (access-by-parent)."""
+    object_type = _EVAL_NODE_OBJECT_TYPE.get(type_name)
+    if object_type is None:
+        return True
+    async with info.context.db.read() as session:
+        scope = await info.context.access_scope(session, object_type)
+        if scope.everything or scope.type_allows:
+            return True
+        parent_id = await _eval_node_parent_id(session, type_name, node_id)
+    return parent_id is not None and scope.allows(parent_id)
+
+
+async def _gate_eval_node(
+    info: Info[Context, None], type_name: str, node_id: int, gid: strawberry.ID
+) -> None:
+    """Gate an eval-world node fetch by its parent dataset's or prompt's accessibility
+    (access-by-parent). Unauthorized is indistinguishable from not-found."""
+    if not await _eval_readable(info, type_name, node_id):
+        raise NotFound(f"Unknown node: {gid}")
 
 
 @strawberry.type
@@ -372,6 +533,7 @@ class Query:
         last: Optional[int] = UNSET,
         after: Optional[CursorString] = UNSET,
         before: Optional[CursorString] = UNSET,
+        filter: Optional[UserFilter] = UNSET,
     ) -> Connection[User]:
         args = ConnectionArgs(
             first=first,
@@ -386,6 +548,13 @@ class Query:
             .order_by(models.User.email)
             .options(joinedload(models.User.role))
         )
+        if filter is not UNSET and filter and filter.value:
+            value = filter.value.strip()
+            if value:
+                search = f"%{value}%"
+                stmt = stmt.where(
+                    or_(models.User.email.ilike(search), models.User.username.ilike(search))
+                )
         async with info.context.db.read() as session:
             users = await session.stream_scalars(stmt)
             data = [User(id=user.id, db_record=user) async for user in users]
@@ -475,6 +644,11 @@ class Query:
         projects_query = exclude_experiment_projects(projects_query)
         projects_query = exclude_dataset_evaluator_projects(projects_query)
         async with info.context.db.read() as session:
+            # Restrict to the projects this actor may access. A no-op when access
+            # control is disabled.
+            projects_query = projects_query.where(
+                await info.context.access_filter(session, OBJECT_TYPE_PROJECT, models.Project.id)
+            )
             projects = await session.stream_scalars(projects_query)
             data = [Project(id=project.id, db_record=project) async for project in projects]
         return connection_from_list(data=data, args=args)
@@ -482,6 +656,44 @@ class Query:
     @strawberry.field
     def projects_last_updated_at(self, info: Info[Context, None]) -> Optional[datetime]:
         return info.context.last_updated_at.get(models.Project)
+
+    @strawberry.field(permission_classes=[IsAdmin])  # type: ignore[untyped-decorator]
+    async def permission_sets(self, info: Info[Context, None]) -> list[PermissionSet]:
+        """The permission sets available when granting access — built-in presets plus
+        any custom roles. Drives the role picker and the roles admin view."""
+        async with info.context.db.read() as session:
+            roles = (
+                await session.scalars(
+                    select(models.PermissionSet)
+                    .options(joinedload(models.PermissionSet.permissions))
+                    .order_by(models.PermissionSet.is_built_in.desc(), models.PermissionSet.name)
+                )
+            ).unique()
+        return [to_gql_permission_set(role) for role in roles]
+
+    @strawberry.field(permission_classes=[IsAdmin])  # type: ignore[untyped-decorator]
+    async def user_groups(
+        self, info: Info[Context, None], local_only: bool = False
+    ) -> list[UserGroup]:
+        """Groups usable as grant subjects. ``local_only`` filters to admin-managed
+        groups (the manageable set); the full list also includes IdP-synced groups, for
+        the grant picker."""
+        async with info.context.db.read() as session:
+            stmt = select(models.UserGroup).order_by(models.UserGroup.id)
+            if local_only:
+                stmt = stmt.where(models.UserGroup.provider == LOCAL_PROVIDER)
+            groups = (await session.scalars(stmt)).all()
+            result: list[UserGroup] = []
+            for group in groups:
+                member_ids = list(
+                    await session.scalars(
+                        select(models.UserGroupMembership.user_id).where(
+                            models.UserGroupMembership.user_group_id == group.id
+                        )
+                    )
+                )
+                result.append(to_gql_user_group(group, member_ids))
+        return result
 
     @strawberry.field
     async def datasets(
@@ -535,6 +747,11 @@ class Query:
                         .distinct()
                     )
         async with info.context.db.read() as session:
+            # Restrict to the datasets this actor may access (creator-private +
+            # grants). A no-op when access control is disabled.
+            stmt = stmt.where(
+                await info.context.access_filter(session, OBJECT_TYPE_DATASET, models.Dataset.id)
+            )
             datasets = await session.scalars(stmt)
         return connection_from_list(
             data=[Dataset(id=dataset.id, db_record=dataset) for dataset in datasets], args=args
@@ -578,6 +795,11 @@ class Query:
                 raise BadRequest(f"Invalid compare experiment ID: {compare_experiment_id}")
 
         experiment_rowids = [base_experiment_rowid, *compare_experiment_rowids]
+
+        # Every named experiment must be readable via its dataset (access-by-parent).
+        for rowid in experiment_rowids:
+            if not await _eval_readable(info, "Experiment", rowid):
+                raise NotFound("Unknown experiment")
 
         cursor = Cursor.from_string(after) if after else None
         page_size = first or 50
@@ -719,6 +941,11 @@ class Query:
                 )
             except ValueError:
                 raise BadRequest(f"Invalid compare experiment ID: {compare_experiment_id}")
+
+        # Every named experiment must be readable via its dataset (access-by-parent).
+        for rowid in (base_experiment_rowid, *compare_experiment_rowids):
+            if not await _eval_readable(info, "Experiment", rowid):
+                raise NotFound("Unknown experiment")
 
         base_experiment_runs = (
             select(
@@ -1005,6 +1232,9 @@ class Query:
                 )
             except Exception:
                 raise NotFound(f"Unknown node: {id}")
+            # The run group is readable iff its experiment's dataset is (access-by-parent).
+            if not await _eval_readable(info, "Experiment", experiment_rowid):
+                raise NotFound(f"Unknown node: {id}")
             return ExperimentRepeatedRunGroup(
                 experiment_rowid=experiment_rowid,
                 dataset_example_rowid=dataset_example_rowid,
@@ -1032,32 +1262,89 @@ class Query:
         if type_name == "Dimension" or type_name == "EmbeddingDimension":
             raise NotFound(f"Unknown node type: {type_name}")
         if type_name == Project.__name__:
+            async with info.context.db.read() as session:
+                access_predicate = await info.context.access_filter(
+                    session, OBJECT_TYPE_PROJECT, models.Project.id
+                )
+                readable = await session.scalar(
+                    select(
+                        exists().where(
+                            models.Project.id == node_id,
+                            access_predicate,
+                        )
+                    )
+                )
+            if not readable:
+                raise NotFound(f"Unknown node: {id}")
             return Project(id=node_id)
         elif type_name == Trace.__name__:
+            await _gate_containment_node(info, type_name, node_id, id)
             return Trace(id=node_id)
         elif type_name == Span.__name__:
+            await _gate_containment_node(info, type_name, node_id, id)
             return Span(id=node_id)
         elif type_name == Dataset.__name__:
+            async with info.context.db.read() as session:
+                scope = await info.context.access_scope(session, OBJECT_TYPE_DATASET)
+            if not scope.allows(node_id):
+                raise NotFound(f"Unknown node: {id}")
             return Dataset(id=node_id)
         elif type_name == DatasetExample.__name__:
+            await _gate_eval_node(info, type_name, node_id, id)
             return DatasetExample(id=node_id)
         elif type_name == DatasetSplit.__name__:
             return DatasetSplit(id=node_id)
         elif type_name == Experiment.__name__:
+            await _gate_eval_node(info, type_name, node_id, id)
             return Experiment(id=node_id)
         elif type_name == ExperimentRun.__name__:
+            await _gate_eval_node(info, type_name, node_id, id)
             return ExperimentRun(id=node_id)
         elif type_name == ExperimentJob.__name__:
+            await _gate_eval_node(info, type_name, node_id, id)
             return ExperimentJob(id=node_id)
         elif type_name == User.__name__:
             if int((user := info.context.user).identity) != node_id and not user.is_admin:
                 raise Unauthorized(MSG_ADMIN_ONLY)
             return User(id=node_id)
+        elif type_name == UserGroup.__name__:
+            if not info.context.user.is_admin:
+                raise Unauthorized(MSG_ADMIN_ONLY)
+            async with info.context.db.read() as session:
+                group = await session.get(models.UserGroup, node_id)
+                if group is None:
+                    raise NotFound(f"Unknown node: {id}")
+                member_ids = list(
+                    await session.scalars(
+                        select(models.UserGroupMembership.user_id).where(
+                            models.UserGroupMembership.user_group_id == group.id
+                        )
+                    )
+                )
+            return to_gql_user_group(group, member_ids)
+        elif type_name == PermissionSet.__name__:
+            if not info.context.user.is_admin:
+                raise Unauthorized(MSG_ADMIN_ONLY)
+            async with info.context.db.read() as session:
+                role = await session.scalar(
+                    select(models.PermissionSet)
+                    .options(joinedload(models.PermissionSet.permissions))
+                    .where(models.PermissionSet.id == node_id)
+                )
+            if role is None:
+                raise NotFound(f"Unknown node: {id}")
+            return to_gql_permission_set(role)
         elif type_name == ProjectSession.__name__:
+            await _gate_containment_node(info, type_name, node_id, id)
             return ProjectSession(id=node_id)
         elif type_name == Prompt.__name__:
+            async with info.context.db.read() as session:
+                scope = await info.context.access_scope(session, OBJECT_TYPE_PROMPT)
+            if not scope.allows(node_id):
+                raise NotFound(f"Unknown node: {id}")
             return Prompt(id=node_id)
         elif type_name == PromptVersion.__name__:
+            await _gate_eval_node(info, type_name, node_id, id)
             async with info.context.db.read() as session:
                 if orm_prompt_version := await session.scalar(
                     select(models.PromptVersion).where(models.PromptVersion.id == node_id)
@@ -1072,8 +1359,10 @@ class Query:
         elif type_name == ProjectTraceRetentionPolicy.__name__:
             return ProjectTraceRetentionPolicy(id=node_id)
         elif type_name == SpanAnnotation.__name__:
+            await _gate_containment_node(info, type_name, node_id, id)
             return SpanAnnotation(id=node_id)
         elif type_name == TraceAnnotation.__name__:
+            await _gate_containment_node(info, type_name, node_id, id)
             return TraceAnnotation(id=node_id)
         elif type_name == GenerativeModel.__name__:
             return GenerativeModel(id=node_id)
@@ -1140,6 +1429,11 @@ class Query:
             )
             stmt = stmt.distinct()
         async with info.context.db.read() as session:
+            # Restrict to the prompts this actor may access (creator-private +
+            # grants). A no-op when access control is disabled.
+            stmt = stmt.where(
+                await info.context.access_filter(session, OBJECT_TYPE_PROMPT, models.Prompt.id)
+            )
             orm_prompts = await session.stream_scalars(stmt)
             data = [
                 Prompt(id=orm_prompt.id, db_record=orm_prompt) async for orm_prompt in orm_prompts
@@ -1571,7 +1865,9 @@ class Query:
         stmt = select(models.Span.id).filter_by(span_id=span_id)
         async with info.context.db.read() as session:
             span_rowid = await session.scalar(stmt)
-        if span_rowid:
+        # Unauthorized is indistinguishable from not-found: a span's access derives from
+        # its project (containment).
+        if span_rowid and await _containment_readable(info, "Span", span_rowid):
             return Span(id=span_rowid)
         return None
 
@@ -1584,7 +1880,7 @@ class Query:
         stmt = select(models.Trace.id).where(models.Trace.trace_id == trace_id)
         async with info.context.db.read() as session:
             trace_rowid = await session.scalar(stmt)
-        if trace_rowid:
+        if trace_rowid and await _containment_readable(info, "Trace", trace_rowid):
             return Trace(id=trace_rowid)
         return None
 
@@ -1597,6 +1893,11 @@ class Query:
         stmt = select(models.Project).where(models.Project.name == name)
         async with info.context.db.read() as session:
             project_row = await session.scalar(stmt)
+            # Unauthorized is indistinguishable from not-found (no name oracle).
+            if project_row is not None:
+                scope = await info.context.access_scope(session, OBJECT_TYPE_PROJECT)
+                if not scope.allows(project_row.id):
+                    return None
         if project_row:
             return Project(id=project_row.id, db_record=project_row)
         return None
@@ -1610,7 +1911,7 @@ class Query:
         stmt = select(models.ProjectSession).where(models.ProjectSession.session_id == session_id)
         async with info.context.db.read() as session:
             session_row = await session.scalar(stmt)
-        if session_row:
+        if session_row and await _containment_readable(info, "ProjectSession", session_row.id):
             return ProjectSession(id=session_row.id, db_record=session_row)
         return None
 
@@ -1630,7 +1931,8 @@ class Query:
         )
         async with info.context.db() as session:
             example = await session.scalar(stmt)
-        if example:
+        # A dataset example's access derives from its dataset (access-by-parent).
+        if example and await _eval_readable(info, "DatasetExample", example.id):
             return DatasetExample(id=example.id, db_record=example)
         return None
 
@@ -1737,17 +2039,26 @@ class Query:
         stmt = exclude_experiment_projects(stmt)
         stmt = exclude_dataset_evaluator_projects(stmt)
         async with info.context.db.read() as session:
+            stmt = stmt.where(
+                await info.context.access_filter(session, OBJECT_TYPE_PROJECT, models.Project.id)
+            )
             return await session.scalar(stmt) or 0
 
     @strawberry.field
     async def dataset_count(self, info: Info[Context, None]) -> int:
         async with info.context.db.read() as session:
-            return await session.scalar(select(func.count(models.Dataset.id))) or 0
+            stmt = select(func.count(models.Dataset.id)).where(
+                await info.context.access_filter(session, OBJECT_TYPE_DATASET, models.Dataset.id)
+            )
+            return await session.scalar(stmt) or 0
 
     @strawberry.field
     async def prompt_count(self, info: Info[Context, None]) -> int:
         async with info.context.db.read() as session:
-            return await session.scalar(select(func.count(models.Prompt.id))) or 0
+            stmt = select(func.count(models.Prompt.id)).where(
+                await info.context.access_filter(session, OBJECT_TYPE_PROMPT, models.Prompt.id)
+            )
+            return await session.scalar(stmt) or 0
 
     @strawberry.field
     async def evaluator_count(self, info: Info[Context, None]) -> int:
