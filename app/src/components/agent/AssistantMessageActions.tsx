@@ -118,7 +118,7 @@ async function postAnnotation(
  * - Trace: opens the associated trace in a new tab. Requires `traceId`.
  *
  * `children` are rendered after the built-in actions in the same toolbar row
- * (e.g. rewind/fork controls), and force the toolbar to render even when the
+ * (e.g. rewind/branch controls), and force the toolbar to render even when the
  * message itself supports no built-in actions.
  *
  * The component silently renders nothing if the message has no text, no

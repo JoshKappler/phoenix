@@ -286,7 +286,7 @@ describe("agentStore", () => {
       expect(store.getState().consumePendingInput(forkId!)).toBeNull();
     });
 
-    it("prefixes the source summary with (fork)", () => {
+    it("prefixes the source summary with (branch)", () => {
       const store = createAgentStore();
       const sourceId = store.getState().createSession();
       store.getState().updateSessionSummary(sourceId, "Debugging traces");
@@ -297,7 +297,7 @@ describe("agentStore", () => {
       });
 
       expect(store.getState().sessionMap[forkId!].shortSummary).toBe(
-        "(fork) Debugging traces"
+        "(branch) Debugging traces"
       );
     });
 
@@ -330,15 +330,15 @@ describe("agentStore", () => {
         messages: [],
       });
       expect(store.getState().sessionMap[refork!].shortSummary).toBe(
-        "(fork) How do I trace OpenAI?"
+        "(branch) How do I trace OpenAI?"
       );
       expect(forkId).not.toBeNull();
     });
 
-    it("does not stack the (fork) prefix when forking a fork", () => {
+    it("does not stack the (branch) prefix when branching from a branch", () => {
       const store = createAgentStore();
       const sourceId = store.getState().createSession();
-      store.getState().updateSessionSummary(sourceId, "(fork) Original");
+      store.getState().updateSessionSummary(sourceId, "(branch) Original");
 
       const forkId = store.getState().forkSession({
         sourceSessionId: sourceId,
@@ -346,7 +346,7 @@ describe("agentStore", () => {
       });
 
       expect(store.getState().sessionMap[forkId!].shortSummary).toBe(
-        "(fork) Original"
+        "(branch) Original"
       );
     });
 
