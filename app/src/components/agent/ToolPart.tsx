@@ -122,6 +122,11 @@ import {
   PatchExperimentToolDetails,
 } from "./PatchExperimentToolDetails";
 import {
+  getReadSkillResourceToolPreview,
+  READ_SKILL_RESOURCE_TOOL_NAME,
+  ReadSkillResourceToolDetails,
+} from "./ReadSkillResourceToolDetails";
+import {
   formatRemovePromptInstanceState,
   getRemovePromptInstanceStatusVariant,
   getRemovePromptInstanceToolPreview,
@@ -1091,6 +1096,14 @@ function getToolPresentation(
         quietLabel: skillName ? `Loaded skill ${skillName}` : "Loaded skill",
       };
     }
+    case READ_SKILL_RESOURCE_TOOL_NAME:
+      return {
+        preview: getReadSkillResourceToolPreview(part),
+        stateLabel: formatToolState(part.state),
+        statusVariant,
+        details: <ReadSkillResourceToolDetails part={part} />,
+        icon: <Icons.FileText />,
+      };
     case NATIVE_WEB_SEARCH_TOOL_NAME:
     case NATIVE_WEB_FETCH_TOOL_NAME:
       return {
