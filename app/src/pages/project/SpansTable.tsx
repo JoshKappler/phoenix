@@ -16,21 +16,19 @@ import React, {
   useState,
 } from "react";
 import { graphql, usePaginationFragment } from "react-relay";
-import { Group, Panel, Separator } from "react-resizable-panels";
+import { Group, Panel } from "react-resizable-panels";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 
 import type { AgentContext } from "@phoenix/agent/context/agentContextTypes";
 import { useAdvertiseAgentContext } from "@phoenix/agent/context/useAdvertiseAgentContext";
 import {
   CopyToClipboardButton,
-  ErrorBoundary,
   Flex,
   Heading,
   Icon,
   Icons,
   Link,
   Text,
-  TextErrorBoundaryFallback,
   ToggleButton,
   ToggleButtonGroup,
   View,
@@ -40,7 +38,6 @@ import { MeanScore } from "@phoenix/components/annotation/MeanScore";
 import { TraceAnnotationSummaryGroupTokens } from "@phoenix/components/annotation/TraceAnnotationSummaryGroup";
 import { ContextualHelp } from "@phoenix/components/core/tooltip/ContextualHelp";
 import { Truncate } from "@phoenix/components/core/utility/Truncate";
-import { compactResizeHandleCSS } from "@phoenix/components/resize";
 import { CellWithControlsWrap, LoadMoreRow } from "@phoenix/components/table";
 import { IndeterminateCheckboxCell } from "@phoenix/components/table/IndeterminateCheckboxCell";
 import { selectableTableCSS } from "@phoenix/components/table/styles";
@@ -82,14 +79,7 @@ import { SpanNotesTableCell } from "./SpanNotesTableCell";
 import { SpanSelectionToolbar } from "./SpanSelectionToolbar";
 import { SpansTableAside } from "./SpansTableAside";
 import { spansTableCSS } from "./styles";
-import {
-  ASIDE_PANEL_DEFAULT_SIZE_PIXELS,
-  ASIDE_PANEL_MAX_SIZE_PIXELS,
-  ASIDE_PANEL_MIN_SIZE_PIXELS,
-  TableAsideSkeleton,
-  TableAsideToggleButton,
-  useTableAsidePanel,
-} from "./TableAside";
+import { TableAsidePanel, TableAsideToggleButton } from "./TableAside";
 import {
   DEFAULT_SORT,
   getGqlSort,
@@ -216,8 +206,6 @@ export function SpansTable(props: SpansTableProps) {
   useAdvertiseAgentContext(advertisedRootSpansOnlyContext);
 
   const columnVisibility = useTracingContext((state) => state.columnVisibility);
-  const { showTableAside, asidePanelRef, onAsidePanelResize } =
-    useTableAsidePanel();
   const { data, loadNext, hasNext, isLoadingNext, refetch } =
     usePaginationFragment<SpansTableSpansQuery, SpansTable_spans$key>(
       graphql`
@@ -1025,28 +1013,9 @@ export function SpansTable(props: SpansTableProps) {
           ) : null}
         </div>
       </Panel>
-      <Separator
-        css={compactResizeHandleCSS}
-        disabled={!showTableAside}
-        style={showTableAside ? undefined : { display: "none" }}
-      />
-      <Panel
-        panelRef={asidePanelRef}
-        defaultSize={ASIDE_PANEL_DEFAULT_SIZE_PIXELS}
-        collapsedSize={0}
-        minSize={ASIDE_PANEL_MIN_SIZE_PIXELS}
-        maxSize={ASIDE_PANEL_MAX_SIZE_PIXELS}
-        collapsible
-        onResize={onAsidePanelResize}
-      >
-        {showTableAside ? (
-          <ErrorBoundary fallback={TextErrorBoundaryFallback}>
-            <Suspense fallback={<TableAsideSkeleton />}>
-              <SpansTableAside filterCondition={filterCondition} />
-            </Suspense>
-          </ErrorBoundary>
-        ) : null}
-      </Panel>
+      <TableAsidePanel>
+        <SpansTableAside filterCondition={filterCondition} />
+      </TableAsidePanel>
     </Group>
   );
 }

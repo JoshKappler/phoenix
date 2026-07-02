@@ -14,32 +14,28 @@ import {
 } from "@tanstack/react-table";
 import React, {
   startTransition,
-  Suspense,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import { graphql, usePaginationFragment } from "react-relay";
-import { Group, Panel, Separator } from "react-resizable-panels";
+import { Group, Panel } from "react-resizable-panels";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 
 import {
   ContextualHelp,
   CopyToClipboardButton,
-  ErrorBoundary,
   Flex,
   Heading,
   Icon,
   Icons,
   Text,
-  TextErrorBoundaryFallback,
   View,
 } from "@phoenix/components";
 import { MeanScore } from "@phoenix/components/annotation/MeanScore";
 import { SessionAnnotationSummaryGroupTokens } from "@phoenix/components/annotation/SessionAnnotationSummaryGroup";
 import { Truncate } from "@phoenix/components/core/utility/Truncate";
-import { compactResizeHandleCSS } from "@phoenix/components/resize";
 import { selectableTableCSS } from "@phoenix/components/table/styles";
 import { TimestampCell } from "@phoenix/components/table/TimestampCell";
 import { LatencyText } from "@phoenix/components/trace/LatencyText";
@@ -65,14 +61,7 @@ import { SessionSearchField } from "./SessionSearchField";
 import { SessionsTableAside } from "./SessionsTableAside";
 import { SessionsTableEmpty } from "./SessionsTableEmpty";
 import { spansTableCSS } from "./styles";
-import {
-  ASIDE_PANEL_DEFAULT_SIZE_PIXELS,
-  ASIDE_PANEL_MAX_SIZE_PIXELS,
-  ASIDE_PANEL_MIN_SIZE_PIXELS,
-  TableAsideSkeleton,
-  TableAsideToggleButton,
-  useTableAsidePanel,
-} from "./TableAside";
+import { TableAsidePanel, TableAsideToggleButton } from "./TableAside";
 import {
   DEFAULT_SESSION_SORT,
   getGqlSessionSort,
@@ -151,8 +140,6 @@ export function SessionsTable(props: SessionsTableProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const { filterIoSubstringOrSessionId } = useSessionSearchContext();
   const { fetchKey } = useStreamState();
-  const { showTableAside, asidePanelRef, onAsidePanelResize } =
-    useTableAsidePanel();
   const { data, loadNext, hasNext, isLoadingNext, refetch } =
     usePaginationFragment<SessionsTableQuery, SessionsTable_sessions$key>(
       graphql`
@@ -662,30 +649,9 @@ export function SessionsTable(props: SessionsTableProps) {
           </div>
         </div>
       </Panel>
-      <Separator
-        css={compactResizeHandleCSS}
-        disabled={!showTableAside}
-        style={showTableAside ? undefined : { display: "none" }}
-      />
-      <Panel
-        panelRef={asidePanelRef}
-        defaultSize={ASIDE_PANEL_DEFAULT_SIZE_PIXELS}
-        collapsedSize={0}
-        minSize={ASIDE_PANEL_MIN_SIZE_PIXELS}
-        maxSize={ASIDE_PANEL_MAX_SIZE_PIXELS}
-        collapsible
-        onResize={onAsidePanelResize}
-      >
-        {showTableAside ? (
-          <ErrorBoundary fallback={TextErrorBoundaryFallback}>
-            <Suspense fallback={<TableAsideSkeleton />}>
-              <SessionsTableAside
-                filterIoSubstring={filterIoSubstringOrSessionId}
-              />
-            </Suspense>
-          </ErrorBoundary>
-        ) : null}
-      </Panel>
+      <TableAsidePanel>
+        <SessionsTableAside filterIoSubstring={filterIoSubstringOrSessionId} />
+      </TableAsidePanel>
     </Group>
   );
 }
